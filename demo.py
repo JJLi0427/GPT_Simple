@@ -1,14 +1,10 @@
 import torch
-
 from gpt_model import GPT
 
 if __name__ == '__main__':
     device = torch.device('cuda')
     model = GPT().to(device)
     model.load_state_dict(torch.load('GPT2.pt'))
-
-
-
     model.eval()
     #初始输入是空，每次加上后面的对话信息
     sentence = ''
