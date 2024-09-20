@@ -11,11 +11,11 @@ train:
   clip: 1
 
 model:
-  d_model: 768, 
-  d_k: 64, 
-  d_v: 64, 
-  d_ff: 2048,
-  n_heads: 8, 
-  n_layers: 6, 
-  max_pos: 1800, 
+  d_model: 768
+  d_k: 64
+  d_v: 64 
+  d_ff: 2048
+  n_heads: 8 
+  n_layers: 6 
+  max_pos: 1800 
 

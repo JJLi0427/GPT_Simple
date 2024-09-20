@@ -13,7 +13,7 @@ from data_process import data_process_pipline, GPTDataSet
 
 
 def train(
-    epochs, clip, save_path,
+    epochs, clip, model_path,
     device, data_loader, model, 
     optimizer, criterion
 ):
@@ -39,7 +39,7 @@ def train(
             epoch_loss += loss.item()
             step += 1
         logging.info(f'Epoch: {epoch + 1:02} | Time: {time.time() - start_time:.2f}s | Loss: {epoch_loss/step:.3f}')
-        torch.save(model.state_dict(), f'{save_path}/GPT2-{epoch}epoch.pt')
+        torch.save(model.state_dict(), f'{model_path}/GPT2-{epoch}epoch.pt')
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -58,27 +58,27 @@ def main(cfg : DictConfig) -> None:
 
     model = GPT(
         word2id, id2word, vocab_size,
-        d_model=int(cfg.model.d_model),
-        d_k=int(cfg.model.d_k),
-        d_v=int(cfg.model.d_v),
-        d_ff=int(cfg.model.d_ff),
-        n_heads=int(cfg.model.n_heads),
-        n_layers=int(cfg.model.n_layers),
-        max_pos=int(cfg.model.max_pos)
+        d_model=cfg.model.d_model,
+        d_k=cfg.model.d_k,
+        d_v=cfg.model.d_v,
+        d_ff=cfg.model.d_ff,
+        n_heads=cfg.model.n_heads,
+        n_layers=cfg.model.n_layers,
+        max_pos=cfg.model.max_pos
     )
     model = model.to(device)
     
     criterion = nn.CrossEntropyLoss(ignore_index=0).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=cfg.lr)
+    optimizer = optim.Adam(model.parameters(), lr=cfg.train.lr)
     
     total_params = sum(p.numel() for p in model.parameters())
     params_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logging.info(f'Total parameters: {total_params}, Trainable parameters: {params_trainable}')
     
-    if not os.path.exists(cfg.path.save_path):
-        os.mkdir(cfg.path.save_path)
+    if not os.path.exists(cfg.path.model_path):
+        os.mkdir(cfg.path.model_path)
     train(
-        cfg.train.epochs, cfg.train.clip, cfg.path.save_path,
+        cfg.train.epochs, cfg.train.clip, cfg.path.model_path,
         device, data_loader, model, 
         optimizer, criterion
     )
