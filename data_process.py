@@ -52,7 +52,7 @@ def make_train_data(data):
 
 def data_process_pipline(raw_txt_path, dataset_path, data_dict_path):
     if not os.path.exists(raw_txt_path):
-        logging.error("File not found")
+        logging.error(f"File not found: {raw_txt_path}")
         exit(1)
 
     if not os.path.exists(dataset_path):

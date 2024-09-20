@@ -1,4 +1,5 @@
 import torch
+import os
 from torch import nn, optim
 import numpy as np
 from tqdm import tqdm
@@ -24,7 +25,7 @@ def get_attn_subsequence_mask(seq):
     attn_shape = [seq.size(0), seq.size(1), seq.size(1)]
     subsequence_mask = np.triu(np.ones(attn_shape), k=1) # Upper triangular matrix
     subsequence_mask = torch.from_numpy(subsequence_mask).byte()
-    subsequence_mask=subsequence_mask.to(seq.device())
+    subsequence_mask=subsequence_mask.to(seq.device)
     return subsequence_mask # [batch_size, tgt_len, tgt_len]
 
 class ScaledDotProductAttention(nn.Module):
@@ -40,6 +41,7 @@ class ScaledDotProductAttention(nn.Module):
             d_k: dim of K
             '''
             scores = torch.matmul(Q, K.transpose(-1, -2)) / np.sqrt(d_k)  # scores : [batch_size, n_heads, len_q, len_k]
+            # import pdb; pdb.set_trace()
             scores.masked_fill_(attn_mask, -1e9)  # Fills elements of self tensor with value where mask is True.
 
             attn = nn.Softmax(dim=-1)(scores)
@@ -48,7 +50,10 @@ class ScaledDotProductAttention(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, d_k, d_v, n_heads):
+    def __init__(
+        self, 
+        d_model, d_k, d_v, n_heads
+    ):
         super(MultiHeadAttention, self).__init__()
         self.d_model = d_model
         self.d_k = d_k
@@ -69,10 +74,10 @@ class MultiHeadAttention(nn.Module):
         '''
         residual, batch_size = input_Q, input_Q.size(0)
         # (B, S, D) -proj-> (B, S, D_new) -split-> (B, S, H, W) -trans-> (B, H, S, W)
-        Q = self.W_Q(input_Q).view(batch_size, self.n_heads, -1, self.d_k).transpose(1, 2)  # Q: [batch_size, n_heads, len_q, d_k]
-        K = self.W_K(input_K).view(batch_size, self.n_heads, -1, self.d_k).transpose(1, 2)  # K: [batch_size, n_heads, len_k, d_k]
-        V = self.W_V(input_V).view(batch_size, self.n_heads, -1, self.d_v).transpose(1, 2)  # V: [batch_size, n_heads, len_v(=len_k), d_v]
-
+        Q = self.W_Q(input_Q).view(batch_size, self.n_heads, -1, self.d_k)#.transpose(1, 2)  # Q: [batch_size, n_heads, len_q, d_k]
+        K = self.W_K(input_K).view(batch_size, self.n_heads, -1, self.d_k)#.transpose(1, 2)  # K: [batch_size, n_heads, len_k, d_k]
+        V = self.W_V(input_V).view(batch_size, self.n_heads, -1, self.d_v)#.transpose(1, 2)  # V: [batch_size, n_heads, len_v(=len_k), d_v]
+        # import pdb; pdb.set_trace()
         attn_mask = attn_mask.unsqueeze(1).repeat(1, self.n_heads, 1, 1)  # attn_mask : [batch_size, n_heads, seq_len, seq_len]
 
         # context: [batch_size, n_heads, len_q, d_v], attn: [batch_size, n_heads, len_q, len_k]
@@ -100,10 +105,13 @@ class PoswiseFeedForwardNet(nn.Module):
         return self.layernorm(output + residual) # [batch_size, seq_len, d_model]
 
 class DecoderLayer(nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        d_model, d_k, d_v, d_ff, n_heads
+    ):
         super(DecoderLayer, self).__init__()
-        self.dec_self_attn = MultiHeadAttention()
-        self.pos_ffn = PoswiseFeedForwardNet()
+        self.dec_self_attn = MultiHeadAttention(d_model, d_k, d_v, n_heads)
+        self.pos_ffn = PoswiseFeedForwardNet(d_model, d_ff)
 
     def forward(self, dec_inputs, dec_self_attn_mask):
         '''
@@ -111,24 +119,34 @@ class DecoderLayer(nn.Module):
         dec_self_attn_mask: [batch_size, tgt_len, tgt_len]
         '''
         # dec_outputs: [batch_size, tgt_len, d_model], dec_self_attn: [batch_size, n_heads, tgt_len, tgt_len]
-        dec_outputs, dec_self_attn = self.dec_self_attn(dec_inputs, dec_inputs, dec_inputs, dec_self_attn_mask)
+        dec_outputs, dec_self_attn = self.dec_self_attn(
+            dec_inputs, dec_inputs, dec_inputs, dec_self_attn_mask
+        )
 
         dec_outputs = self.pos_ffn(dec_outputs)  # [batch_size, tgt_len, d_model]
         return dec_outputs, dec_self_attn
 
 class Decoder(nn.Module):
-    def __init__(self, d_model, vocab_size, max_pos, n_layers):
+    def __init__(
+        self, vocab_size, 
+        d_model, d_k, d_v, d_ff,
+        n_heads, n_layers, max_pos, 
+    ):
         super(Decoder, self).__init__()
         self.tgt_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = nn.Embedding(max_pos,d_model)
-        self.layers = nn.ModuleList([DecoderLayer() for _ in range(n_layers)])
+        self.layers = nn.ModuleList()
+        for _ in range(n_layers):
+            self.layers.append(
+                DecoderLayer(d_model, d_k, d_v, d_ff, n_heads)
+            )
 
     def forward(self, dec_inputs):
         '''
         dec_inputs: [batch_size, tgt_len]
         '''
         seq_len = dec_inputs.size(1)
-        device = dec_inputs.device()
+        device = dec_inputs.device
         pos = torch.arange(seq_len, dtype=torch.long, device=device)
         pos = pos.unsqueeze(0).expand_as(dec_inputs)  # [seq_len] -> [batch_size, seq_len]
 
@@ -137,8 +155,6 @@ class Decoder(nn.Module):
         dec_self_attn_pad_mask = get_attn_pad_mask(dec_inputs, dec_inputs) # [batch_size, tgt_len, tgt_len]
         dec_self_attn_subsequence_mask = get_attn_subsequence_mask(dec_inputs)# [batch_size, tgt_len, tgt_len]
         dec_self_attn_mask = torch.gt((dec_self_attn_pad_mask + dec_self_attn_subsequence_mask), 0) # [batch_size, tgt_len, tgt_len]
-
-
 
         dec_self_attns = []
         for layer in self.layers:
@@ -149,9 +165,22 @@ class Decoder(nn.Module):
         return dec_outputs, dec_self_attns
 
 class GPT(nn.Module):
-    def __init__(self, d_model, vocab_size, word2id, id2word):
+    def __init__(
+        self, word2id, id2word, vocab_size, 
+        d_model = 768, 
+        d_k = 64, 
+        d_v = 64, 
+        d_ff = 2048,
+        n_heads = 8, 
+        n_layers = 6, 
+        max_pos = 1800, 
+        
+    ):
         super(GPT, self).__init__()
-        self.decoder = Decoder()
+        self.decoder = Decoder(
+            vocab_size, d_model, d_k, d_v, d_ff, 
+            n_heads, n_layers, max_pos
+        )
         self.projection = nn.Linear(d_model, vocab_size)
         self.word2id = word2id
         self.id2word = id2word
@@ -170,13 +199,18 @@ class GPT(nn.Module):
     def greedy_decoder(self, dec_input):
         terminal = False
         start_dec_len=len(dec_input[0])
-        device = dec_input.device()
+        device = dec_input.device
         # 一直预测下一个单词，直到预测到"<sep>"结束，如果一直不到"<sep>"，则根据长度退出循环，并在最后加上”<sep>“字符
         while not terminal :
             if len(dec_input[0])-start_dec_len>100:
                 next_symbol=self.word2id['<sep>']
                 dec_input = torch.cat(
-                    [dec_input.detach(), torch.tensor([[next_symbol]], dtype=dec_input.dtype, device=device)], -1)
+                    [
+                        dec_input.detach(), 
+                        torch.tensor([[next_symbol]], dtype=dec_input.dtype, device=device)
+                    ], 
+                    -1
+                )
                 break
             dec_outputs, _ = self.decoder(dec_input)
             projected = self.projection(dec_outputs)
@@ -187,7 +221,12 @@ class GPT(nn.Module):
                 terminal = True
 
             dec_input = torch.cat(
-                [dec_input.detach(), torch.tensor([[next_symbol]], dtype=dec_input.dtype, device=device)], -1)
+                [
+                    dec_input.detach(), 
+                    torch.tensor([[next_symbol]], dtype=dec_input.dtype, device=device)
+                ], 
+                -1
+            )
 
         return dec_input
 

@@ -1,0 +1,21 @@
+path:
+  raw_txt_path: '/home/ljj/code/GPT_Simple/data/train.txt'
+  dataset_path: '/home/ljj/code/GPT_Simple/data/dataset.txt'
+  data_dict_path: '/home/ljj/code/GPT_Simple/data/data_dict.json'
+  model_path: './ckpt'  
+
+train:
+  batch_size: 8
+  epochs: 30
+  lr: 0.0001
+  clip: 1
+
+model:
+  d_model: 768, 
+  d_k: 64, 
+  d_v: 64, 
+  d_ff: 2048,
+  n_heads: 8, 
+  n_layers: 6, 
+  max_pos: 1800, 
+
