@@ -6,9 +6,10 @@ path:
 
 train:
   batch_size: 8
-  epochs: 30
+  epochs: 50
   lr: 0.0001
   clip: 1
+  num_workers: 4
 
 model:
   d_model: 768

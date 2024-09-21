@@ -10,6 +10,10 @@ from tqdm import tqdm
 from gpt_model import *
 from torch.utils.data import DataLoader
 from data_process import data_process_pipline, GPTDataSet
+import torch.distributed as dist
+from datetime import datetime
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 def train(
@@ -44,17 +48,48 @@ def train(
 
 @hydra.main(config_path="config", config_name="config")
 def main(cfg : DictConfig) -> None:
+    if os.environ.get("WORLD_SIZE") is None:
+        logging.warning("'WORLD_SIZE' not set in the environment.")
+        world_size = 1
+    else:
+        world_size = int(os.environ["WORLD_SIZE"])
+    local_rank = 0
+    if os.environ.get("LOCAL_RANK") is not None:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        
+    rank = 0
+    if os.environ.get("RANK") is None:
+        logging.warning("'RANK' is not set in the environment.")
+    else:
+        rank = int(os.environ["RANK"])
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(local_rank)
+    logging.info(f'Rank: {rank}, Local Rank: {local_rank}, World Size: {world_size}')
+    device = local_rank
+    
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logging.info(OmegaConf.to_yaml(cfg))
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     train_data, word2id, id2word = data_process_pipline(
-        cfg.path.raw_txt_path, cfg.path.dataset_path, cfg.path.data_dict_path
+        cfg.path.raw_txt_path, 
+        cfg.path.dataset_path, 
+        cfg.path.data_dict_path
     )
     vocab_size = len(word2id)
 
-    dataset = GPTDataSet(train_data, word2id, id2word)
-    data_loader = DataLoader(dataset, batch_size=cfg.train.batch_size, collate_fn=dataset.padding_batch)
+    dataset = GPTDataSet(
+        train_data, 
+        word2id, 
+        id2word
+    )
+    train_sampler = DistributedSampler(dataset)
+    data_loader = DataLoader(
+        dataset, 
+        batch_size=cfg.train.batch_size, 
+        collate_fn=dataset.padding_batch,
+        num_workers=cfg.train.num_workers,
+        sampler=train_sampler
+    )
 
     model = GPT(
         word2id, id2word, vocab_size,
@@ -67,9 +102,13 @@ def main(cfg : DictConfig) -> None:
         max_pos=cfg.model.max_pos
     )
     model = model.to(device)
-    
+    ddp_model = DDP(
+        model, 
+        device_ids=[device], 
+        output_device=device
+    )
     criterion = nn.CrossEntropyLoss(ignore_index=0).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=cfg.train.lr)
+    optimizer = optim.Adam(ddp_model.parameters(), lr=cfg.train.lr)
     
     total_params = sum(p.numel() for p in model.parameters())
     params_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -79,7 +118,7 @@ def main(cfg : DictConfig) -> None:
         os.mkdir(cfg.path.model_path)
     train(
         cfg.train.epochs, cfg.train.clip, cfg.path.model_path,
-        device, data_loader, model, 
+        device, data_loader, ddp_model, 
         optimizer, criterion
     )
 
